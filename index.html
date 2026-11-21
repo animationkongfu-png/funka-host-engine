@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<link rel="manifest" href="manifest.json">
+<title>Funka Host</title>
+<style>
+:root{--bg:#0f172a;--card:#1e293b;--line:#334155;--txt:#f1f5f9;--mut:#94a3b8;--acc:#22c55e;--bad:#ef4444;--warn:#f59e0b}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{background:var(--bg);color:var(--txt);font:15px system-ui,sans-serif;padding-bottom:76px}
+header{padding:16px;font-weight:700;font-size:18px;display:flex;justify-content:space-between;align-items:center}
+header small{color:var(--mut);font-weight:400;font-size:12px}
+main{padding:0 14px 14px;max-width:640px;margin:auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+h2{font-size:16px;margin-bottom:8px}
+input,select,textarea{width:100%;background:var(--bg);color:var(--txt);border:1px solid var(--line);border-radius:10px;padding:12px;margin:5px 0;font:inherit}
+button,.btn{background:var(--acc);color:#06240f;border:0;border-radius:10px;padding:11px 14px;font:inherit;font-weight:700;cursor:pointer;text-decoration:none;display:inline-block}
+button.g,.btn.g{background:var(--line);color:var(--txt)}button.r{background:var(--bad);color:#fff}button.w{background:var(--warn)}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}.row>*{flex:1;text-align:center}
+.pill{font-size:11px;padding:3px 8px;border-radius:99px;background:var(--line)}
+.on{background:#14532d;color:#86efac}.off{background:#450a0a;color:#fca5a5}.mid{background:#451a03;color:#fcd34d}
+.mut{color:var(--mut);font-size:13px}
+pre{background:#020617;border-radius:10px;padding:10px;max-height:220px;overflow:auto;font-size:12px;color:#86efac;white-space:pre-wrap}
+nav{position:fixed;bottom:0;left:0;right:0;background:var(--card);border-top:1px solid var(--line);display:flex;padding-bottom:env(safe-area-inset-bottom)}
+nav button{flex:1;background:none;color:var(--mut);border-radius:0;padding:12px 2px;font-size:12px;font-weight:500}
+nav button.a{color:var(--acc)}
+.top{display:flex;justify-content:space-between;align-items:center}
+.note{background:#172554;border:1px solid #1e40af;border-radius:10px;padding:10px;margin-bottom:12px;font-size:13px}
+</style></head><body>
+<header><span>⚡ Funka Host <small>Hosting Engine</small></span><span id="who" class="mut"></span></header>
+<main id="app"></main>
+<nav id="nav"></nav>
+<script>
+/* ===== EDIT THIS SECTION WITH YOUR OWN DETAILS ===== */
+const CFG={
+  ADMIN_EMAIL:"your@gmail.com",
+  WHATSAPP:"2547XXXXXXXX",
+  MPESA:"07XXXXXXXX",
+  TELEGRAM:"FunkaHostBot",
+  TIKTOK:"https://tiktok.com/@yourname",
+  FACEBOOK:"https://facebook.com/yourpage",
+  YOUTUBE:"https://youtube.com/@yourchannel",
+  PLANS:{
+    free:{name:"Free",price:0,bots:1,ram:"128 MB"},
+    basic:{name:"Basic",price:200,bots:3,ram:"256 MB"},
+    pro:{name:"Pro",price:500,bots:10,ram:"512 MB"}
+  }
+};
+const TEMPLATES=[
+  {id:"wa",name:"WhatsApp Bot",ico:"💬"},
+  {id:"tg",name:"Telegram Bot",ico:"✈️"},
+  {id:"dc",name:"Discord Bot",ico:"🎮"}
+];
+const READY=[
+  {id:"r1",name:"Auto-Reply Bot",ico:"🤖",desc:"Replies to common questions"},
+  {id:"r2",name:"Group Manager",ico:"🛡️",desc:"Welcome, anti-spam, rules"},
+  {id:"r3",name:"Music & Media Bot",ico:"🎵",desc:"Search and send media"}
+];
+const db={
+  get(k,d){try{return JSON.parse(localStorage.getItem("fh_"+k))??d}catch(e){return d}},
+  set(k,v){localStorage.setItem("fh_"+k,JSON.stringify(v))}
+};
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const uid=()=>Math.random().toString(36).slice(2,10);
+const now=()=>new Date().toLocaleTimeString();
+async function hash(t){const b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(t));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("")}
+
+let view="home",sel=null,authMode="login";
+const me=()=>{const e=db.get("session",null);return db.get("users",[]).find(u=>u.email===e)||null};
+const isAdmin=u=>u&&u.email===CFG.ADMIN_EMAIL.toLowerCase();
+function plan(u){ if(u.plan!=="free"&&u.expires&&Date.now()>u.expires){u.plan="free";save(u)} return CFG.PLANS[u.plan]||CFG.PLANS.free }
+function save(u){const us=db.get("users",[]);const i=us.findIndex(x=>x.email===u.email);us[i]=u;db.set("users",us)}
+const myBots=u=>db.get("bots",[]).filter(b=>b.owner===u.email);
+function saveBot(b){const bs=db.get("bots",[]);const i=bs.findIndex(x=>x.id===b.id);i<0?bs.push(b):bs[i]=b;db.set("bots",bs)}
+
+async function doAuth(){
+  const email=$("#em").value.trim().toLowerCase(),pw=$("#pw").value;
+  if(!email.includes("@")||pw.length<6)return alert("Enter a valid email and a password of 6+ characters.");
+  const us=db.get("users",[]),h=await hash(pw);
+  if(authMode==="signup"){
+    if(us.find(u=>u.email===email))return alert("Account already exists.");
+    us.push({email,pw:h,plan:"free",expires:0,banned:false,joined:Date.now()});db.set("users",us);
+  }else{
+    const u=us.find(x=>x.email===email&&x.pw===h);
+    if(!u)return alert("Wrong email or password.");
+    if(u.banned)return alert("This account is suspended. Contact support.");
+  }
+  db.set("session",email);view="home";render();
+}
+function logout(){db.set("session",null);view="home";render()}
+
+function createBot(tpl,name){
+  const u=me(),p=plan(u);
+  if(myBots(u).length>=p.bots)return alert("Your "+p.name+" plan allows "+p.bots+" bot(s). Upgrade to add more.");
+  const b={id:uid(),owner:u.email,name:name||"My Bot",tpl,status:"offline",auto:true,logs:["["+now()+"] Bot created"],files:[]};
+  saveBot(b);sel=b.id;view="bot";render();
+}
+function setStatus(id,action){
+  const b=db.get("bots",[]).find(x=>x.id===id);
+  if(action==="stop"){b.status="offline";b.logs.push("["+now()+"] Stopped");saveBot(b);return render()}
+  b.status="starting";b.logs.push("["+now()+"] "+(action==="restart"?"Restarting":"Starting")+"...");saveBot(b);render();
+  setTimeout(()=>{const c=db.get("bots",[]).find(x=>x.id===id);if(!c||c.status!=="starting")return;
+    c.status="online";c.logs.push("["+now()+"] Online (demo mode: connect the Engine server for real hosting)");saveBot(c);render()},1200);
+}
+function toggleAuto(id){const b=db.get("bots",[]).find(x=>x.id===id);b.auto=!b.auto;saveBot(b);render()}
+function delBot(id){if(!confirm("Delete this bot?"))return;db.set("bots",db.get("bots",[]).filter(b=>b.id!==id));view="home";render()}
+function upload(id,inp){
+  const b=db.get("bots",[]).find(x=>x.id===id);
+  [...inp.files].forEach(f=>{b.files.push({name:f.name,size:f.size});b.logs.push("["+now()+"] Uploaded "+f.name)});
+  saveBot(b);render();
+}
+function delFile(id,i){const b=db.get("bots",[]).find(x=>x.id===id);b.files.splice(i,1);saveBot(b);render()}
+
+function submitPay(pl){
+  const code=$("#code").value.trim().toUpperCase();
+  if(code.length<8)return alert("Enter the M-Pesa confirmation code (e.g. QWE1R2T3Y4).");
+  const u=me(),ps=db.get("pays",[]);
+  ps.push({id:uid(),email:u.email,plan:pl,code,status:"pending",at:Date.now()});db.set("pays",ps);
+  alert("Sent! The admin will activate your plan shortly.");view="home";render();
+}
+function decide(id,ok){
+  const ps=db.get("pays",[]),p=ps.find(x=>x.id===id);p.status=ok?"approved":"rejected";db.set("pays",ps);
+  if(ok){const us=db.get("users",[]),u=us.find(x=>x.email===p.email);u.plan=p.plan;u.expires=Date.now()+30*864e5;db.set("users",us)}
+  render();
+}
+function ban(email){const us=db.get("users",[]),u=us.find(x=>x.email===email);u.banned=!u.banned;db.set("users",us);render()}
+function announce(){db.set("announce",$("#ann").value);alert("Announcement saved.");render()}
+
+const badge=s=>'<span class="pill '+(s==="online"?"on":s==="starting"?"mid":"off")+'">'+s+'</span>';
+function vAuth(){return `<div class="card"><h2>${authMode==="login"?"Welcome back":"Create your account"}</h2>
+<input id="em" type="email" placeholder="Email" autocomplete="email">
+<input id="pw" type="password" placeholder="Password (6+ characters)">
+<div class="row"><button onclick="doAuth()">${authMode==="login"?"Log in":"Sign up"}</button></div>
+<p class="mut" style="margin-top:10px;text-align:center" onclick="authMode=authMode==='login'?'signup':'login';render()">${authMode==="login"?"New here? Sign up":"Have an account? Log in"}</p></div>`}
+
+function vHome(u){
+  const p=plan(u),bs=myBots(u),an=db.get("announce","");
+  return (an?`<div class="note">📢 ${esc(an)}</div>`:"")+
+  `<div class="card"><div class="top"><div><h2>${esc(p.name)} plan</h2><span class="mut">${bs.length}/${p.bots} bots · ${p.ram} RAM each</span></div>
+  <button class="g" onclick="view='plans';render()">Upgrade</button></div></div>
+  <div class="top"><h2>My bots</h2><button onclick="view='new';render()">+ New</button></div>`+
+  (bs.length?bs.map(b=>`<div class="card" onclick="sel='${b.id}';view='bot';render()"><div class="top"><b>${esc(b.name)}</b>${badge(b.status)}</div>
+  <span class="mut">${TEMPLATES.find(t=>t.id===b.tpl)?.name||"Ready-made bot"}</span></div>`).join(""):`<div class="card mut">No bots yet. Tap “+ New” to deploy your first one.</div>`);
+}
+
+function vNew(){return `<div class="card"><h2>Bring your own bot</h2><input id="bn" placeholder="Bot name">
+${TEMPLATES.map(t=>`<div class="row"><button class="g" onclick="createBot('${t.id}',$('#bn').value)">${t.ico} ${t.name}</button></div>`).join("")}</div>
+<div class="card"><h2>Ready-made bots</h2>${READY.map(r=>`<div class="top" style="margin:10px 0"><div><b>${r.ico} ${r.name}</b><div class="mut">${r.desc}</div></div>
+<button onclick="createBot('${r.id}','${r.name}')">Deploy</button></div>`).join("")}</div>`}
+
+function vBot(u){
+  const b=db.get("bots",[]).find(x=>x.id===sel);if(!b||b.owner!==u.email){view="home";return vHome(u)}
+  return `<div class="top"><button class="g" onclick="view='home';render()">← Back</button>${badge(b.status)}</div>
+  <div class="card" style="margin-top:12px"><h2>${esc(b.name)}</h2>
+  <div class="row"><button onclick="setStatus('${b.id}','start')">▶ Start</button><button class="w" onclick="setStatus('${b.id}','restart')">⟳ Restart</button><button class="r" onclick="setStatus('${b.id}','stop')">■ Stop</button></div>
+  <div class="top" style="margin-top:12px"><span>Auto-restart on crash</span><button class="g" onclick="toggleAuto('${b.id}')">${b.auto?"ON":"OFF"}</button></div></div>
+  <div class="card"><h2>Live console</h2><pre>${esc(b.logs.slice(-40).join("\n"))}</pre></div>
+  <div class="card"><h2>Files</h2>
+  ${b.files.map((f,i)=>`<div class="top" style="margin:6px 0"><span>📄 ${esc(f.name)} <span class="mut">${(f.size/1024).toFixed(1)} KB</span></span><button class="g" onclick="delFile('${b.id}',${i})">✕</button></div>`).join("")||'<p class="mut">No files yet.</p>'}
+  <input type="file" multiple onchange="upload('${b.id}',this)"></div>
+  <button class="r" style="width:100%" onclick="delBot('${b.id}')">Delete bot</button>`;
+}
+
+function vPlans(u){
+  return Object.entries(CFG.PLANS).map(([k,p])=>`<div class="card"><div class="top"><h2>${p.name}</h2><b>${p.price?"KES "+p.price+"/mo":"Free"}</b></div>
+  <p class="mut">${p.bots} bot(s) · ${p.ram} RAM each · auto-restart</p>${u.plan===k?'<span class="pill on">Current plan</span>':
+  (p.price?`<div class="row"><button onclick="sel='${k}';view='pay';render()">Choose ${p.name}</button></div>`:"")}</div>`).join("");
+}
+function vPay(){const p=CFG.PLANS[sel];return `<div class="card"><h2>Pay for ${p.name}: KES ${p.price}</h2>
+<p class="mut">1. Send KES ${p.price} by M-Pesa to <b style="color:#fff">${esc(CFG.MPESA)}</b><br>2. Paste the M-Pesa confirmation code below<br>3. The admin activates your plan</p>
+<input id="code" placeholder="M-Pesa code e.g. QWE1R2T3Y4"><div class="row"><button onclick="submitPay('${sel}')">Submit payment</button><button class="g" onclick="view='plans';render()">Cancel</button></div></div>`}
+
+function vContact(){
+  const L=(i,t,h)=>`<a class="btn g" style="display:block;margin:8px 0;text-align:left" href="${h}" target="_blank" rel="noopener">${i} ${t}</a>`;
+  return `<div class="card"><h2>Contact & follow us</h2>
+  ${L("💬","WhatsApp support","https://wa.me/"+CFG.WHATSAPP)}${L("✈️","Telegram bot","https://t.me/"+CFG.TELEGRAM)}
+  ${L("🎵","TikTok",CFG.TIKTOK)}${L("📘","Facebook",CFG.FACEBOOK)}${L("▶️","YouTube",CFG.YOUTUBE)}</div>`;
+}
+
+function vAdmin(){
+  const us=db.get("users",[]),ps=db.get("pays",[]),bs=db.get("bots",[]),pend=ps.filter(p=>p.status==="pending");
+  const earn=ps.filter(p=>p.status==="approved").reduce((a,p)=>a+CFG.PLANS[p.plan].price,0);
+  return `<div class="card"><h2>Overview</h2><p class="mut">${us.length} users · ${bs.length} bots · ${bs.filter(b=>b.status==="online").length} online<br>Earned: KES ${earn}</p></div>
+  <div class="card"><h2>Pending payments (${pend.length})</h2>${pend.map(p=>`<div style="margin:8px 0"><b>${esc(p.email)}</b> → ${p.plan}<br><span class="mut">Code: ${esc(p.code)}</span>
+  <div class="row"><button onclick="decide('${p.id}',true)">Approve</button><button class="r" onclick="decide('${p.id}',false)">Reject</button></div></div>`).join("")||'<p class="mut">None</p>'}</div>
+  <div class="card"><h2>Announcement</h2><textarea id="ann" rows="2">${esc(db.get("announce",""))}</textarea><div class="row"><button onclick="announce()">Publish</button></div></div>
+  <div class="card"><h2>Users</h2>${us.map(u=>`<div class="top" style="margin:8px 0"><span>${esc(u.email)}<br><span class="mut">${u.plan}${u.banned?" · suspended":""}</span></span>
+  ${u.email!==CFG.ADMIN_EMAIL.toLowerCase()?`<button class="g" onclick="ban('${u.email}')">${u.banned?"Restore":"Suspend"}</button>`:""}</div>`).join("")}</div>`;
+}
+
+function render(){
+  const u=me();$("#who").textContent=u?u.email.split("@")[0]:"";
+  if(!u){$("#nav").innerHTML="";$("#app").innerHTML=vAuth();return}
+  const tabs=[["home","🏠","Home"],["plans","💳","Plans"],["contact","💬","Contact"]];
+  if(isAdmin(u))tabs.push(["admin","🛠️","Admin"]);tabs.push(["out","🚪","Logout"]);
+  $("#nav").innerHTML=tabs.map(t=>`<button class="${view===t[0]?"a":""}" onclick="${t[0]==="out"?"logout()":"view='"+t[0]+"';render()"}">${t[1]}<br>${t[2]}</button>`).join("");
+  const V={home:vHome,new:vNew,bot:vBot,plans:vPlans,pay:vPay,contact:vContact,admin:vAdmin};
+  $("#app").innerHTML=(V[view]||vHome)(u);
+}
+render();
+if("serviceWorker" in navigator)navigator.serviceWorker.register("sw.js").catch(()=>{});
+</script></body></html>
