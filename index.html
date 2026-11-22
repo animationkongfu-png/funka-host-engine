@@ -201,4 +201,36 @@ function render(){
 }
 render();
 if("serviceWorker" in navigator)navigator.serviceWorker.register("sw.js").catch(()=>{});
-</script></body></html>
+</script></body></html><script>
+(function(){
+  var _doAuth=doAuth;
+  doAuth=async function(){
+    await _doAuth();
+    var u=me();
+    if(u&&isAdmin(u))db.set("adminDevice",u.email);
+  };
+  logout=function(){
+    var u=me();
+    if(u&&isAdmin(u))return;
+    db.set("session",null);view="home";render();
+  };
+  render=function(){
+    var u=me();
+    if(!u){
+      var ad=db.get("adminDevice",null);
+      if(ad){db.set("session",ad);u=me();}
+    }
+    $("#who").textContent=u?u.email.split("@")[0]:"";
+    if(!u){$("#nav").innerHTML="";$("#app").innerHTML=vAuth();return}
+    var tabs=[["home","🏠","Home"],["plans","💳","Plans"],["contact","💬","Contact"]];
+    if(isAdmin(u))tabs.push(["admin","🛠️","Admin"]);
+    $("#nav").innerHTML=tabs.map(function(t){
+      return '<button class="'+(view===t[0]?"a":"")+'" onclick="view=\''+t[0]+'\';render()">'+t[1]+'<br>'+t[2]+'</button>';
+    }).join("");
+    var V={home:vHome,new:vNew,bot:vBot,plans:vPlans,pay:vPay,contact:vContact,admin:vAdmin};
+    var out=isAdmin(u)?"":'<p style="text-align:center;margin:28px 0;font-size:13px"><a href="#" onclick="logout();return false" style="color:#64748b">Log out</a></p>';
+    $("#app").innerHTML=(V[view]||vHome)(u)+out;
+  };
+  render();
+})();
+</script>
