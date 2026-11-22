@@ -5,20 +5,27 @@
  "start_url": "./index.html",
  "scope": "./",
  "display": "standalone",
+ "orientation": "portrait",
  "background_color": "#0f172a",
  "theme_color": "#0f172a",
  "icons": [
   {
-   "src": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMAAAADAAQMAAABoEv5EAAAABlBMVEUPFyoixV5I6cKkAAAAQUlEQVR42u3UsQoAEBRAUaT8/x/5MwYpi4GB5ZxJrumVFwLATmlTHRdp91IQnoa8nKOR/AjLXjASwa8VBOEuABzoCSEPVQiq/u4AAAAASUVORK5CYII=",
+   "src": "icon-192.png",
    "sizes": "192x192",
    "type": "image/png",
-   "purpose": "any maskable"
+   "purpose": "any"
   },
   {
-   "src": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAgAAAAIAAQMAAADOtka5AAAABlBMVEUPFyoixV5I6cKkAAAAmElEQVR42u3ZMQqAMAxA0TR4j97/WJ6k3RxaFMGKCO9PHcoLZE2EJEmSJEmSJEmSJC2strPmv/l0GAAAAAAAAAAAAAAAAAAA4P/AXoYsEQAAAAAAAABwry2uL5fHs6UlAgAAAAAAAAAAAAAAEG9eedISAQAAAAAAAAAAAAAAAAAAAAAAAAAAAADAYkCSJEmSJEmSJEmSPqsD+YUfQmKSJhoAAAAASUVORK5CYII=",
+   "src": "icon-512.png",
    "sizes": "512x512",
    "type": "image/png",
-   "purpose": "any maskable"
+   "purpose": "any"
+  },
+  {
+   "src": "icon-512.png",
+   "sizes": "512x512",
+   "type": "image/png",
+   "purpose": "maskable"
   }
  ]
 }
