@@ -233,4 +233,22 @@ if("serviceWorker" in navigator)navigator.serviceWorker.register("sw.js").catch(
   };
   render();
 })();
+</script><script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/13.4.0/firebase-app.js";
+import { getAuth } from "https://www.gstatic.com/firebasejs/13.4.0/firebase-auth.js";
+import { getFirestore } from "https://www.gstatic.com/firebasejs/13.4.0/firebase-firestore.js";
+const firebaseConfig = {
+  apiKey: "AIzaSyAH57gIzAWDZa8BKGvh0TmyBfTFFd2wo7M",
+  authDomain: "funka-host-4dd22.firebaseapp.com",
+  projectId: "funka-host-4dd22",
+  storageBucket: "funka-host-4dd22.firebasestorage.app",
+  messagingSenderId: "25063956437",
+  appId: "1:25063956437:web:b9afbae534d2c95903275c"
+};
+const app = initializeApp(firebaseConfig);
+window.FB = { app: app, auth: getAuth(app), db: getFirestore(app) };
+var t = document.createElement("p");
+t.style.cssText = "text-align:center;font-size:11px;color:#64748b;margin:8px 0 80px";
+t.textContent = "Firebase connected";
+document.body.appendChild(t);
 </script>
