@@ -251,4 +251,181 @@ var t = document.createElement("p");
 t.style.cssText = "text-align:center;font-size:11px;color:#64748b;margin:8px 0 80px";
 t.textContent = "Firebase connected";
 document.body.appendChild(t);
-</script>
+</script><script type="module">
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/13.4.0/firebase-auth.js";
+import { doc, getDoc, setDoc, deleteDoc, collection, query, where, onSnapshot } from "https://www.gstatic.com/firebasejs/13.4.0/firebase-firestore.js";
+
+var auth = window.FB.auth, fdb = window.FB.db;
+var cu = null, ready = false, syncMsg = "", unsubs = [], banShown = false;
+var store = { users: [], bots: [], pays: [], announce: "" };
+var snap = { users: {}, bots: {}, pays: {} };
+
+function stable(v){
+  if (Array.isArray(v)) return "[" + v.map(stable).join(",") + "]";
+  if (v && typeof v === "object") {
+    return "{" + Object.keys(v).sort().filter(function(k){ return v[k] !== undefined; })
+      .map(function(k){ return JSON.stringify(k) + ":" + stable(v[k]); }).join(",") + "}";
+  }
+  return JSON.stringify(v);
+}
+function clean(o){ return JSON.parse(JSON.stringify(o)); }
+function isAdm(){ return !!cu && (cu.email || "").toLowerCase() === CFG.ADMIN_EMAIL.toLowerCase(); }
+
+function setStat(){
+  Array.prototype.forEach.call(document.querySelectorAll("body > p"), function(p){
+    if (p.textContent === "Firebase connected") p.remove();
+  });
+  var p = document.getElementById("fbstat");
+  if (!p) {
+    p = document.createElement("p"); p.id = "fbstat";
+    p.style.cssText = "text-align:center;font-size:11px;color:#64748b;margin:8px 14px 80px;word-break:break-word";
+    document.body.appendChild(p);
+  }
+  p.textContent = "☁ " + (cu ? ("Signed in · " + (syncMsg || "synced")) : "Not signed in");
+}
+function err(k, e){
+  syncMsg = "sync problem (" + k + ": " + ((e && e.code) || e) + ")";
+  console.error(k, e); setStat();
+}
+function safeRender(){
+  var a = document.activeElement;
+  if (a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.tagName === "SELECT") && a.type !== "file" && document.getElementById("app").contains(a)) return;
+  window.render();
+}
+
+var _get = db.get, _set = db.set;
+db.get = function(k, d){
+  if (k === "session") return cu ? (cu.email || "").toLowerCase() : d;
+  if (k === "users" || k === "bots" || k === "pays") return store[k];
+  if (k === "announce") return store.announce;
+  return _get(k, d);
+};
+function push(k, arr){
+  var seen = {};
+  arr.forEach(function(x){
+    var id = (k === "users") ? x.uid : x.id;
+    if (!id) return;
+    seen[id] = 1;
+    var o = clean(x);
+    if (k === "bots") {
+      o.ownerUid = o.ownerUid || cu.uid;
+      if (o.logs && o.logs.length > 100) o.logs = o.logs.slice(-100);
+    }
+    if (k === "pays") o.uid = o.uid || cu.uid;
+    var j = stable(o);
+    if (snap[k][id] === j) return;
+    snap[k][id] = j;
+    setDoc(doc(fdb, k, id), o).catch(function(e){ err(k, e); });
+  });
+  if (k === "bots") {
+    Object.keys(snap.bots).forEach(function(id){
+      if (!seen[id]) { delete snap.bots[id]; deleteDoc(doc(fdb, "bots", id)).catch(function(e){ err("bots", e); }); }
+    });
+  }
+}
+db.set = function(k, v){
+  if (k === "session") return;
+  if (!cu && (k === "users" || k === "bots" || k === "pays" || k === "announce")) return;
+  if (k === "users" || k === "bots" || k === "pays") { store[k] = v; push(k, v); return; }
+  if (k === "announce") {
+    store.announce = v;
+    setDoc(doc(fdb, "config", "announce"), { text: v }).catch(function(e){ err("announce", e); });
+    return;
+  }
+  _set(k, v);
+};
+
+function stopListen(){
+  unsubs.forEach(function(f){ try { f(); } catch(e) {} });
+  unsubs = [];
+  store = { users: [], bots: [], pays: [], announce: "" };
+  snap = { users: {}, bots: {}, pays: {} };
+}
+function listen(kind, ref, single){
+  unsubs.push(onSnapshot(ref, function(s){
+    var arr = [];
+    if (single) { if (s.exists()) arr.push(s.data()); }
+    else s.forEach(function(d){ arr.push(d.data()); });
+    store[kind] = arr; snap[kind] = {};
+    arr.forEach(function(x){ var id = (kind === "users") ? x.uid : x.id; if (id) snap[kind][id] = stable(x); });
+    syncMsg = ""; setStat();
+    if (kind === "users") checkBan();
+    safeRender();
+  }, function(e){ err(kind, e); safeRender(); }));
+}
+function checkBan(){
+  var u = me();
+  if (u && u.banned && !isAdm() && !banShown) {
+    banShown = true; alert("This account is suspended. Contact support."); signOut(auth);
+  }
+}
+
+onAuthStateChanged(auth, async function(user){
+  stopListen(); cu = user; ready = true; banShown = false;
+  if (!user) { setStat(); window.render(); return; }
+  var ref = doc(fdb, "users", user.uid);
+  try {
+    var s = await getDoc(ref);
+    if (!s.exists()) await setDoc(ref, { uid: user.uid, email: (user.email || "").toLowerCase(), plan: "free", expires: 0, banned: false, joined: Date.now() });
+  } catch(e) { err("profile", e); }
+  if (isAdm()) {
+    listen("users", collection(fdb, "users"));
+    listen("bots", collection(fdb, "bots"));
+    listen("pays", collection(fdb, "pays"));
+  } else {
+    listen("users", ref, true);
+    listen("bots", query(collection(fdb, "bots"), where("ownerUid", "==", user.uid)));
+    listen("pays", query(collection(fdb, "pays"), where("uid", "==", user.uid)));
+  }
+  unsubs.push(onSnapshot(doc(fdb, "config", "announce"), function(s){
+    store.announce = s.exists() ? (s.data().text || "") : ""; safeRender();
+  }, function(e){}));
+  setStat(); window.render();
+});
+
+window.doAuth = async function(){
+  var email = $("#em").value.trim().toLowerCase(), pw = $("#pw").value;
+  if (!email.includes("@") || pw.length < 6) return alert("Enter a valid email and a password of 6+ characters.");
+  try {
+    if (authMode === "signup") await createUserWithEmailAndPassword(auth, email, pw);
+    else await signInWithEmailAndPassword(auth, email, pw);
+    view = "home";
+  } catch(e) {
+    var c = (e && e.code) || "";
+    if (c === "auth/email-already-in-use") alert("Account already exists. Log in instead.");
+    else if (c === "auth/invalid-credential" || c === "auth/wrong-password" || c === "auth/user-not-found" || c === "auth/invalid-email") alert("Wrong email or password.");
+    else if (c === "auth/weak-password") alert("Password is too weak. Use 6+ characters.");
+    else if (c === "auth/network-request-failed") alert("No internet. Try again.");
+    else if (c === "auth/too-many-requests") alert("Too many tries. Wait a few minutes and try again.");
+    else alert("Could not continue: " + c);
+  }
+};
+window.logout = function(){
+  if (isAdm()) return;
+  signOut(auth); view = "home";
+};
+window.hardLogout = function(){ signOut(auth); view = "home"; };
+
+window.render = function(){
+  var u = me();
+  $("#who").textContent = cu ? (cu.email || "").split("@")[0] : "";
+  if (!ready) { $("#nav").innerHTML = ""; $("#app").innerHTML = '<div class="card mut">Loading...</div>'; return; }
+  if (!cu) { $("#nav").innerHTML = ""; $("#app").innerHTML = vAuth(); return; }
+  if (!u) {
+    $("#nav").innerHTML = "";
+    $("#app").innerHTML = '<div class="card"><h2>Loading your account...</h2><p class="mut">' + esc(syncMsg || "Please wait a moment.") + '</p></div>' +
+      '<p style="text-align:center;margin:28px 0;font-size:13px"><a href="#" onclick="hardLogout();return false" style="color:#64748b">Log out</a></p>';
+    return;
+  }
+  var tabs = [["home","🏠","Home"],["plans","💳","Plans"],["contact","💬","Contact"]];
+  if (isAdmin(u)) tabs.push(["admin","🛠️","Admin"]);
+  $("#nav").innerHTML = tabs.map(function(t){
+    return '<button class="' + (view === t[0] ? "a" : "") + '" onclick="view=\'' + t[0] + '\';render()">' + t[1] + '<br>' + t[2] + '</button>';
+  }).join("");
+  var V = { home: vHome, new: vNew, bot: vBot, plans: vPlans, pay: vPay, contact: vContact, admin: vAdmin };
+  var out = isAdmin(u) ? "" : '<p style="text-align:center;margin:28px 0;font-size:13px"><a href="#" onclick="logout();return false" style="color:#64748b">Log out</a></p>';
+  $("#app").innerHTML = (V[view] || vHome)(u) + out;
+};
+setStat();
+window.render();
+               </script>
