@@ -428,4 +428,108 @@ window.render = function(){
 };
 setStat();
 window.render();
-               </script>
+               </script><script type="module">
+/* Funka Host - Admin controls: see every bot, Stop / Pause / Continue / Ban, warn and suspend users */
+var W = window;
+var admE = function(){ return CFG.ADMIN_EMAIL.toLowerCase(); };
+var pill = function(s){ return '<span class="pill ' + (s === "online" ? "on" : (s === "starting" || s === "paused") ? "mid" : "off") + '">' + esc(s) + '</span>'; };
+
+W.adminBot = function(id, action){
+  var bs = db.get("bots", []), b = bs.find(function(x){ return x.id === id; });
+  if (!b) return;
+  if (action === "stop") { b.status = "offline"; b.locked = true; b.lockReason = "Stopped by admin"; }
+  else if (action === "pause") { b.status = "paused"; b.locked = true; b.lockReason = "Paused by admin"; }
+  else if (action === "ban") {
+    var r = prompt("Why is this bot banned? (the user will see this)", "Abuse of the system");
+    if (r === null) return;
+    b.status = "banned"; b.locked = true; b.lockReason = "Banned: " + (r || "abuse");
+  }
+  else if (action === "continue") { b.status = (b.status === "paused") ? "online" : "offline"; b.locked = false; b.lockReason = ""; }
+  b.logs = (b.logs || []).concat(["[" + now() + "] Admin: " + action]);
+  db.set("bots", bs); render();
+};
+W.adminWarn = function(email){
+  var us = db.get("users", []), u = us.find(function(x){ return x.email === email; });
+  if (!u) return;
+  var t = prompt("Warning message for " + email + ":", "Your bot is using too many resources. Please fix it or it will be banned.");
+  if (t === null || !t.trim()) return;
+  u.warning = t.trim(); u.warnAt = Date.now(); db.set("users", us); render();
+};
+W.adminClearWarn = function(email){
+  var us = db.get("users", []), u = us.find(function(x){ return x.email === email; });
+  if (!u) return; u.warning = ""; db.set("users", us); render();
+};
+W.ban = function(email){
+  if (email === admE()) return;
+  var us = db.get("users", []), u = us.find(function(x){ return x.email === email; });
+  if (!u) return;
+  u.banned = !u.banned;
+  if (u.banned) {
+    var bs = db.get("bots", []);
+    bs.forEach(function(b){
+      if (b.owner === email) { b.status = "banned"; b.locked = true; b.lockReason = "Account suspended"; b.logs = (b.logs || []).concat(["[" + now() + "] Admin: account suspended"]); }
+    });
+    db.set("bots", bs);
+  }
+  db.set("users", us); render();
+};
+
+/* locked bots: the owner cannot change them */
+function locked(id){
+  var u = me(); if (isAdmin(u)) return false;
+  var b = db.get("bots", []).find(function(x){ return x.id === id; });
+  if (b && b.locked) { alert("This bot is locked by the admin: " + (b.lockReason || "") + ". Contact support."); return true; }
+  return false;
+}
+["setStatus", "toggleAuto", "delBot", "delFile", "upload"].forEach(function(n){
+  var o = W[n];
+  W[n] = function(id){ if (locked(id)) return; return o.apply(this, arguments); };
+});
+
+var oHome = W.vHome;
+W.vHome = function(u){
+  var w = (u && u.warning && !isAdmin(u)) ? '<div class="card" style="border-color:#f59e0b"><h2>⚠ Warning from admin</h2><p>' + esc(u.warning) + '</p></div>' : "";
+  return w + oHome.apply(this, arguments);
+};
+var oBot = W.vBot;
+W.vBot = function(u){
+  var h = oBot.apply(this, arguments);
+  var b = db.get("bots", []).find(function(x){ return x.id === sel; });
+  if (b && b.locked && b.owner === u.email) {
+    h = '<div class="card" style="border-color:#ef4444"><h2>🔒 ' + esc(b.lockReason || "Locked by admin") + '</h2><p class="mut">You cannot start, change or delete this bot. Contact support on the Contact tab.</p></div>' + h;
+  }
+  return h;
+};
+
+W.vAdmin = function(){
+  var us = db.get("users", []), ps = db.get("pays", []), bs = db.get("bots", []);
+  var pend = ps.filter(function(p){ return p.status === "pending"; });
+  var earn = ps.filter(function(p){ return p.status === "approved"; }).reduce(function(a, p){ return a + (CFG.PLANS[p.plan] ? CFG.PLANS[p.plan].price : 0); }, 0);
+  var botsHtml = bs.map(function(b){
+    var btns = b.locked
+      ? '<button onclick="adminBot(\'' + b.id + '\',\'continue\')">▶ Continue</button>' + (b.status !== "banned" ? '<button class="r" onclick="adminBot(\'' + b.id + '\',\'ban\')">⛔ Ban</button>' : "")
+      : '<button class="r" onclick="adminBot(\'' + b.id + '\',\'stop\')">■ Stop</button><button class="w" onclick="adminBot(\'' + b.id + '\',\'pause\')">⏸ Pause</button><button class="g" onclick="adminBot(\'' + b.id + '\',\'ban\')">⛔ Ban</button>';
+    return '<div style="margin:10px 0;padding-top:10px;border-top:1px solid var(--line)"><div class="top"><b>' + esc(b.name) + '</b>' + pill(b.status) + '</div>' +
+      '<span class="mut">' + esc(b.owner || "?") + ' · ' + esc((TEMPLATES.find(function(t){ return t.id === b.tpl; }) || {}).name || "Ready-made bot") + (b.lockReason ? " · " + esc(b.lockReason) : "") + '</span>' +
+      '<div class="row">' + btns + '</div>' +
+      '<details><summary class="mut" style="margin-top:6px">Log</summary><pre>' + esc((b.logs || []).slice(-8).join("\n")) + '</pre></details></div>';
+  }).join("") || '<p class="mut">No bots yet.</p>';
+  var usersHtml = us.map(function(u){
+    var n = bs.filter(function(b){ return b.owner === u.email; }).length;
+    var isA = u.email === admE();
+    return '<div style="margin:10px 0;padding-top:10px;border-top:1px solid var(--line)"><div class="top"><span>' + esc(u.email) + '<br><span class="mut">' + esc(u.plan) + ' · ' + n + ' bot(s)' + (u.banned ? " · suspended" : "") + '</span></span></div>' +
+      (u.warning ? '<p class="mut" style="color:#fcd34d">⚠ ' + esc(u.warning) + '</p>' : "") +
+      (isA ? "" : '<div class="row"><button class="w" onclick="adminWarn(\'' + esc(u.email) + '\')">⚠ Warn</button>' +
+        (u.warning ? '<button class="g" onclick="adminClearWarn(\'' + esc(u.email) + '\')">Clear warning</button>' : "") +
+        '<button class="' + (u.banned ? "" : "r") + '" onclick="ban(\'' + esc(u.email) + '\')">' + (u.banned ? "Restore" : "Suspend") + '</button></div>') + '</div>';
+  }).join("");
+  return '<div class="card"><h2>Overview</h2><p class="mut">' + us.length + ' users · ' + bs.length + ' bots · ' + bs.filter(function(b){ return b.status === "online"; }).length + ' online<br>Earned: KES ' + earn + '</p></div>' +
+    '<div class="card"><h2>All bots (' + bs.length + ')</h2>' + botsHtml + '</div>' +
+    '<div class="card"><h2>Pending payments (' + pend.length + ')</h2>' + (pend.map(function(p){
+      return '<div style="margin:8px 0"><b>' + esc(p.email) + '</b> → ' + esc(p.plan) + '<br><span class="mut">Code: ' + esc(p.code) + '</span><div class="row"><button onclick="decide(\'' + p.id + '\',true)">Approve</button><button class="r" onclick="decide(\'' + p.id + '\',false)">Reject</button></div></div>';
+    }).join("") || '<p class="mut">None</p>') + '</div>' +
+    '<div class="card"><h2>Announcement</h2><textarea id="ann" rows="2">' + esc(db.get("announce", "")) + '</textarea><div class="row"><button onclick="announce()">Publish</button></div></div>' +
+    '<div class="card"><h2>Users</h2>' + usersHtml + '</div>';
+};
+W.render && W.render();
+    </script>
