@@ -532,4 +532,39 @@ W.vAdmin = function(){
     '<div class="card"><h2>Users</h2>' + usersHtml + '</div>';
 };
 W.render && W.render();
+    </script><script type="module">
+/* Funka Host - Owner mode: you are the admin, not a customer */
+var W = window;
+
+/* 1. Admin page shows only your customers (hides your own account and your own bots) */
+var oAdminView = W.vAdmin;
+W.vAdmin = function(){
+  var adm = CFG.ADMIN_EMAIL.toLowerCase(), g = db.get;
+  db.get = function(k, d){
+    var v = g.call(db, k, d);
+    if (k === "users") return v.filter(function(u){ return u.email !== adm; });
+    if (k === "bots") return v.filter(function(b){ return b.owner !== adm; });
+    return v;
+  };
+  try { return oAdminView.apply(this, arguments); } finally { db.get = g; }
+};
+
+/* 2. Admin has no plan and no bot limit */
+var oPlan = W.plan;
+W.plan = function(u){
+  if (u && isAdmin(u)) return { name: "Admin", price: 0, bots: 9999, ram: "Unlimited" };
+  return oPlan.apply(this, arguments);
+};
+
+/* 3. Admin Home shows an owner card instead of "Free plan / Upgrade" */
+var oHome2 = W.vHome;
+W.vHome = function(u){
+  var h = oHome2.apply(this, arguments);
+  if (u && isAdmin(u)) {
+    h = h.replace(/<div class="card"><div class="top"><div><h2>[\s\S]*?Upgrade<\/button><\/div><\/div>/,
+      '<div class="card"><h2>👑 Owner account</h2><span class="mut">Admin · unlimited bots · no plan needed</span></div>');
+  }
+  return h;
+};
+W.render && W.render();
     </script>
