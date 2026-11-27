@@ -567,4 +567,110 @@ W.vHome = function(u){
   return h;
 };
 W.render && W.render();
+    </script><script type="module">
+/* Funka Host - M-Pesa payment with screenshot: user uploads, admin approves or rejects */
+var W = window;
+var okShot = function(s){ return typeof s === "string" && s.length < 900000 && /^data:image\/jpeg;base64,[A-Za-z0-9+\/=]+$/.test(s); };
+var pillFor = function(s){ return '<span class="pill ' + (s === "approved" ? "on" : s === "pending" ? "mid" : "off") + '">' + esc(s) + '</span>'; };
+
+/* shrink the screenshot so it fits in the database (about 100-250 KB) */
+function shrink(file){
+  return new Promise(function(res, rej){
+    var r = new FileReader();
+    r.onerror = rej;
+    r.onload = function(){
+      var im = new Image();
+      im.onerror = rej;
+      im.onload = function(){
+        var tries = [[900, 0.6], [700, 0.5], [550, 0.4]], out = "";
+        for (var i = 0; i < tries.length; i++) {
+          var s = Math.min(1, tries[i][0] / Math.max(im.width, im.height));
+          var c = document.createElement("canvas");
+          c.width = Math.max(1, Math.round(im.width * s)); c.height = Math.max(1, Math.round(im.height * s));
+          c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
+          out = c.toDataURL("image/jpeg", tries[i][1]);
+          if (out.length < 600000) break;
+        }
+        out.length < 900000 ? res(out) : rej(new Error("too big"));
+      };
+      im.src = r.result;
+    };
+    r.readAsDataURL(file);
+  });
+}
+
+/* user: payment page */
+W.vPay = function(u){
+  var p = CFG.PLANS[sel];
+  if (!p || !p.price) { view = "plans"; return W.vPlans(u); }
+  return '<div class="card"><h2>Pay for ' + esc(p.name) + ': KES ' + p.price + '</h2>' +
+    '<p class="mut">1. Send <b style="color:#fff">KES ' + p.price + '</b> by M-Pesa to <b style="color:#fff">' + esc(CFG.MPESA) + '</b><br>' +
+    '2. Take a screenshot of the M-Pesa confirmation message<br>3. Upload the screenshot below<br>4. The admin checks it and activates your plan</p>' +
+    '<input id="code" placeholder="M-Pesa code (optional) e.g. QWE1R2T3Y4">' +
+    '<input id="shot" type="file" accept="image/*">' +
+    '<div class="row"><button id="paybtn" onclick="submitPay(\'' + sel + '\')">Send for approval</button><button class="g" onclick="view=\'plans\';render()">Cancel</button></div></div>';
+};
+
+W.submitPay = async function(pl){
+  var f = $("#shot") && $("#shot").files[0];
+  if (!f) return alert("Please upload your M-Pesa payment screenshot.");
+  var u = me(), ps = db.get("pays", []);
+  if (ps.some(function(x){ return x.email === u.email && x.plan === pl && x.status === "pending"; })) return alert("You already have a payment waiting for approval.");
+  var btn = $("#paybtn"); btn.disabled = true; btn.textContent = "Uploading...";
+  var shot;
+  try { shot = await shrink(f); }
+  catch (e) { btn.disabled = false; btn.textContent = "Send for approval"; return alert("Could not use that image. Please try another screenshot."); }
+  ps.push({ id: uid(), email: u.email, plan: pl, code: (($("#code") && $("#code").value) || "").trim().toUpperCase(), shot: shot, status: "pending", at: Date.now() });
+  db.set("pays", ps);
+  alert("Sent! The admin will check your screenshot and activate your plan.");
+  view = "home"; render();
+};
+
+/* user: list of my payments under the plans */
+var oPlans = W.vPlans;
+W.vPlans = function(u){
+  var h = oPlans.apply(this, arguments);
+  if (isAdmin(u)) return h;
+  var mine = db.get("pays", []).filter(function(x){ return x.email === u.email; }).sort(function(a, b){ return b.at - a.at; }).slice(0, 5);
+  if (!mine.length) return h;
+  return h + '<div class="card"><h2>My payments</h2>' + mine.map(function(p){
+    return '<div class="top" style="margin:8px 0"><span>' + esc((CFG.PLANS[p.plan] || {}).name || p.plan) + '<br><span class="mut">' + new Date(p.at).toLocaleDateString() + '</span></span>' + pillFor(p.status) + '</div>';
+  }).join("") + '</div>';
+};
+
+/* admin: view a screenshot full screen */
+W.showShot = function(id){
+  var p = db.get("pays", []).find(function(x){ return x.id === id; });
+  if (!p || !okShot(p.shot)) return;
+  var d = document.createElement("div");
+  d.style.cssText = "position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.92);z-index:99;display:flex;align-items:center;justify-content:center;padding:10px";
+  d.onclick = function(){ d.remove(); };
+  var im = document.createElement("img");
+  im.src = p.shot; im.style.cssText = "max-width:100%;max-height:100%";
+  d.appendChild(im); document.body.appendChild(d);
+};
+
+/* admin: payments card with screenshots */
+var oAdmin = W.vAdmin;
+W.vAdmin = function(){
+  var h = oAdmin.apply(this, arguments);
+  var ps = db.get("pays", []).slice().sort(function(a, b){ return b.at - a.at; });
+  var pend = ps.filter(function(p){ return p.status === "pending"; });
+  var done = ps.filter(function(p){ return p.status !== "pending"; }).slice(0, 8);
+  var card = '<div class="card"><h2>Pending payments (' + pend.length + ')</h2>' + (pend.map(function(p){
+    var pr = (CFG.PLANS[p.plan] || {}).price;
+    return '<div style="margin:10px 0;padding-top:10px;border-top:1px solid var(--line)"><b>' + esc(p.email) + '</b> → ' + esc(p.plan) + (pr ? ' · KES ' + pr : '') +
+      '<br><span class="mut">' + new Date(p.at).toLocaleString() + (p.code ? ' · Code: ' + esc(p.code) : '') + '</span>' +
+      (okShot(p.shot) ? '<img src="' + p.shot + '" onclick="showShot(\'' + p.id + '\')" style="display:block;width:100%;max-height:220px;object-fit:contain;background:#020617;border-radius:10px;margin-top:8px">' +
+        '<span class="mut">Tap the picture to enlarge</span>' : '<br><span class="mut" style="color:#fcd34d">No screenshot</span>') +
+      '<div class="row"><button onclick="decide(\'' + p.id + '\',true)">Approve</button><button class="r" onclick="decide(\'' + p.id + '\',false)">Reject</button></div></div>';
+  }).join("") || '<p class="mut">None</p>') + '</div>' +
+  (done.length ? '<div class="card"><h2>Recent payments</h2>' + done.map(function(p){
+    return '<div class="top" style="margin:8px 0"><span>' + esc(p.email) + '<br><span class="mut">' + esc(p.plan) + ' · ' + new Date(p.at).toLocaleDateString() + '</span></span>' + pillFor(p.status) + '</div>';
+  }).join("") + '</div>' : '');
+  var i = h.indexOf('<div class="card"><h2>Pending payments'), j = h.indexOf('<div class="card"><h2>Announcement');
+  if (i >= 0 && j > i) h = h.slice(0, i) + card + h.slice(j);
+  return h;
+};
+W.render && W.render();
     </script>
