@@ -778,4 +778,176 @@ W.render = function () {
   }
 };
 W.render();
-                                    </script>
+                                    </script><script type="module">
+/* Funka Host - Funka AI voice: speak button, Live talk mode, read aloud, and Show screen (screenshot help) */
+var W = window;
+var AI_URL = "https://fanka-ai.animationkongfu.workers.dev";
+var SR = W.SpeechRecognition || W.webkitSpeechRecognition;
+var lang = "en-KE", readAloud = false, live = false, listening = false, speaking = false, noSpeech = 0, pendingImage = null, rec = null;
+try { lang = localStorage.getItem("funkaLang") || "en-KE"; readAloud = localStorage.getItem("funkaRead") === "1"; } catch (e) {}
+
+/* attach the screenshot to the AI request without touching the chat code */
+var realFetch = W.fetch.bind(W);
+W.fetch = function(url, opts){
+  try {
+    if (String(url) === AI_URL && pendingImage && opts && typeof opts.body === "string") {
+      var b = JSON.parse(opts.body); b.image = pendingImage; opts = Object.assign({}, opts, { body: JSON.stringify(b) });
+      pendingImage = null; setTimeout(paint, 0);
+    }
+  } catch (e) {}
+  return realFetch(url, opts);
+};
+
+function ta(){ return document.getElementById("aiin"); }
+function setText(v){ var t = ta(); if (t) { t.value = v; t.dispatchEvent(new Event("input")); } }
+function save(k, v){ try { localStorage.setItem(k, v); } catch (e) {} }
+
+function shrinkImg(file){
+  return new Promise(function(res, rej){
+    var r = new FileReader(); r.onerror = rej;
+    r.onload = function(){
+      var im = new Image(); im.onerror = rej;
+      im.onload = function(){
+        var tries = [[1024, 0.7], [800, 0.6], [640, 0.5]], out = "";
+        for (var i = 0; i < tries.length; i++) {
+          var s = Math.min(1, tries[i][0] / Math.max(im.width, im.height));
+          var c = document.createElement("canvas");
+          c.width = Math.max(1, Math.round(im.width * s)); c.height = Math.max(1, Math.round(im.height * s));
+          c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
+          out = c.toDataURL("image/jpeg", tries[i][1]);
+          if (out.length < 400000) break;
+        }
+        out.length < 800000 ? res(out) : rej(new Error("big"));
+      };
+      im.src = r.result;
+    };
+    r.readAsDataURL(file);
+  });
+}
+
+/* ---------- speaking the answer ---------- */
+function speakable(t){
+  t = String(t).replace(/```[\s\S]*?```/g, " The code is on your screen. ").replace(/[*_#`>|]/g, "").replace(/\s+/g, " ").trim();
+  return t.length > 900 ? t.slice(0, 900) + ". The rest is on your screen." : t;
+}
+function speak(text){
+  return new Promise(function(done){
+    if (!W.speechSynthesis) return done();
+    try {
+      W.speechSynthesis.cancel();
+      var u = new SpeechSynthesisUtterance(speakable(text));
+      u.lang = lang; speaking = true;
+      var fin = function(){ speaking = false; done(); };
+      u.onend = fin; u.onerror = fin;
+      W.speechSynthesis.speak(u);
+      setTimeout(fin, 60000);
+    } catch (e) { speaking = false; done(); }
+  });
+}
+function lastReply(){
+  var cards = document.querySelectorAll("#aimsgs > .card");
+  if (!cards.length) return "";
+  var c = cards[cards.length - 1].cloneNode(true);
+  Array.prototype.forEach.call(c.querySelectorAll("pre"), function(p){ p.replaceWith(document.createTextNode(" The code is on your screen. ")); });
+  Array.prototype.forEach.call(c.querySelectorAll("button"), function(b){ b.remove(); });
+  Array.prototype.forEach.call(c.querySelectorAll("br"), function(b){ b.replaceWith(document.createTextNode(" ")); });
+  return c.textContent;
+}
+
+/* ---------- listening ---------- */
+function stopAll(){
+  live = false; listening = false; noSpeech = 0;
+  try { if (rec) rec.abort(); } catch (e) {}
+  try { if (W.speechSynthesis) W.speechSynthesis.cancel(); } catch (e) {}
+  speaking = false; paint();
+}
+function listen(auto){
+  if (!SR) { alert("Voice is not available on this phone's browser. Use the microphone on your keyboard instead."); live = false; paint(); return; }
+  if (listening) return;
+  var final = "", interim = "";
+  rec = new SR();
+  rec.lang = lang; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
+  rec.onstart = function(){ listening = true; paint(); };
+  rec.onresult = function(e){
+    interim = "";
+    for (var i = e.resultIndex; i < e.results.length; i++) {
+      if (e.results[i].isFinal) final += e.results[i][0].transcript + " "; else interim += e.results[i][0].transcript;
+    }
+    setText((final + interim).trim());
+  };
+  rec.onerror = function(e){
+    if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+      alert("Please allow the microphone for this app (phone Settings, Apps, Funka Host, Permissions, Microphone).");
+      live = false;
+    }
+  };
+  rec.onend = async function(){
+    listening = false; paint();
+    var said = final.trim();
+    if (!said) {
+      if (live && ++noSpeech < 3) return listen(true);
+      if (live) { live = false; paint(); }
+      return;
+    }
+    noSpeech = 0;
+    if (!ta()) return stopAll();
+    await W.aiSend();
+    if (live && view === "ai") {
+      await speak(lastReply());
+      if (live && view === "ai") listen(true);
+    } else if (readAloud && view === "ai") speak(lastReply());
+  };
+  try { rec.start(); } catch (e) { listening = false; }
+}
+
+W.fvMic = function(){ if (listening) { try { rec.stop(); } catch (e) {} return; } live = false; listen(false); };
+W.fvLive = function(){ if (live) return stopAll(); live = true; noSpeech = 0; paint(); listen(true); };
+W.fvRead = function(){ readAloud = !readAloud; save("funkaRead", readAloud ? "1" : "0"); if (!readAloud && W.speechSynthesis) W.speechSynthesis.cancel(); paint(); };
+W.fvLang = function(v){ lang = v; save("funkaLang", v); };
+W.fvShot = function(){ var f = document.getElementById("fvfile"); if (f) f.click(); };
+W.fvShotPicked = async function(inp){
+  var f = inp.files && inp.files[0]; if (!f) return;
+  try {
+    pendingImage = await shrinkImg(f);
+    var t = ta(); if (t && !t.value.trim()) setText("Please look at my screen and help me fix this.");
+  } catch (e) { alert("Could not use that picture. Try another screenshot."); }
+  inp.value = ""; paint();
+};
+W.fvShotClear = function(){ pendingImage = null; paint(); };
+
+/* ---------- the buttons ---------- */
+function paint(){
+  var t = ta();
+  if (!t || view !== "ai") return;
+  var old = document.getElementById("fvbar"); if (old) old.remove();
+  var b = document.createElement("div");
+  b.id = "fvbar";
+  var btn = function(label, fn, on){ return '<button class="' + (on ? "" : "g") + '" style="flex:1;min-width:30%;padding:10px 4px;font-size:13px" onclick="' + fn + '">' + label + '</button>'; };
+  b.innerHTML =
+    '<div style="display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 6px">' +
+    btn(listening && !live ? "⏹ Stop" : "🎤 Speak", "fvMic()", listening && !live) +
+    btn(live ? (speaking ? "🔊 Talking… (tap to stop)" : listening ? "🔴 Listening… (tap to stop)" : "🔴 Live on (tap to stop)") : "🔴 Live talk", "fvLive()", live) +
+    btn(pendingImage ? "📷 Screenshot ready ✓" : "📷 Show screen", pendingImage ? "fvShotClear()" : "fvShot()", !!pendingImage) +
+    '</div>' +
+    '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">' +
+    '<select style="flex:1;margin:0;padding:8px" onchange="fvLang(this.value)"><option value="en-KE"' + (lang === "en-KE" ? " selected" : "") + '>English</option><option value="sw-KE"' + (lang === "sw-KE" ? " selected" : "") + '>Kiswahili</option></select>' +
+    '<button class="' + (readAloud ? "" : "g") + '" style="flex:1;padding:8px;font-size:13px" onclick="fvRead()">' + (readAloud ? "🔊 Read aloud: ON" : "🔈 Read aloud: OFF") + '</button></div>' +
+    (pendingImage ? '<p class="mut" style="margin:0 0 6px">Your screenshot will be sent with your next message. Tap the button again to remove it.</p>' : '') +
+    '<input id="fvfile" type="file" accept="image/*" style="display:none" onchange="fvShotPicked(this)">';
+  t.parentElement.insertBefore(b, t);
+}
+
+/* the chat redraws itself after every message, so put the buttons back when that happens */
+var obs = new MutationObserver(function(){
+  if (view === "ai" && document.getElementById("aiin") && !document.getElementById("fvbar")) paint();
+});
+obs.observe(document.getElementById("app"), { childList: true });
+
+var prev = W.render;
+W.render = function(){
+  prev();
+  if (view !== "ai" && (live || listening || speaking)) stopAll();
+  else paint();
+};
+W.render();
+                           </script>
