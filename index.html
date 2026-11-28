@@ -673,4 +673,109 @@ W.vAdmin = function(){
   return h;
 };
 W.render && W.render();
-    </script>
+    </script><script type="module">
+/* Funka Host - Funka AI chat tab */
+var W = window;
+var AI_URL = "https://fanka-ai.animationkongfu.workers.dev";
+var chat = [], busy = false, draft = "", codes = [];
+
+function fmt(t) {
+  var parts = String(t).split("```"), out = "";
+  for (var i = 0; i < parts.length; i++) {
+    if (i % 2 === 1) {
+      var c = parts[i].replace(/^[a-zA-Z0-9+#-]*\n/, "").replace(/\n$/, "");
+      codes.push(c);
+      out += '<div style="position:relative;margin:8px 0"><button class="g" style="position:absolute;right:6px;top:6px;padding:4px 10px;font-size:12px" onclick="aiCopy(' + (codes.length - 1) + ',this)">Copy</button>' +
+        '<pre style="background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:34px 10px 10px;overflow-x:auto;font-size:12.5px;white-space:pre">' + esc(c) + '</pre></div>';
+    } else {
+      out += esc(parts[i]).replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>").replace(/`([^`\n]+)`/g, '<code style="background:var(--bg);padding:1px 5px;border-radius:5px">$1</code>').replace(/\n/g, "<br>");
+    }
+  }
+  return out;
+}
+
+function aiView() {
+  codes = [];
+  var h = '<div class="card"><h2>🤖 Funka AI</h2><p class="mut">Ask me anything. I give free code for apps, websites and bots. For a full build done for you, ask me and I will show you how.</p></div>';
+  h += '<div id="aimsgs">';
+  if (!chat.length) h += '<div class="card mut">Hi! 👋 I am Funka AI. Try: "Write me a simple WhatsApp bot that replies hello".</div>';
+  chat.forEach(function (m) {
+    if (m.role === "user") h += '<div style="display:flex;justify-content:flex-end;margin-bottom:10px"><div style="background:var(--acc);color:#052e16;border-radius:14px 14px 4px 14px;padding:10px 12px;max-width:88%;word-break:break-word">' + esc(m.content).replace(/\n/g, "<br>") + '</div></div>';
+    else h += '<div class="card" style="word-break:break-word' + (m.err ? ";border-color:var(--warn)" : "") + '">' + fmt(m.content) + '</div>';
+  });
+  if (busy) h += '<div class="card mut">Funka AI is thinking…</div>';
+  h += '</div>';
+  h += '<div class="card"><textarea id="aiin" rows="3" placeholder="Type your question…">' + esc(draft) + '</textarea>' +
+    '<div class="row"><button id="aisend" onclick="aiSend()"' + (busy ? " disabled" : "") + '>Send</button><button class="g" onclick="aiClear()">Clear chat</button></div></div>';
+  return h;
+}
+
+function mount() {
+  var a = document.getElementById("app");
+  if (!a) return;
+  var logout = a.querySelector('p a[onclick^="logout"]');
+  var tail = logout ? logout.parentElement.outerHTML : "";
+  a.innerHTML = aiView() + tail;
+  var ta = document.getElementById("aiin");
+  if (ta) ta.addEventListener("input", function () { draft = ta.value; });
+}
+
+W.aiCopy = function (i, btn) {
+  var t = codes[i] || "";
+  var done = function () { btn.textContent = "Copied ✓"; setTimeout(function () { btn.textContent = "Copy"; }, 1500); };
+  try { navigator.clipboard.writeText(t).then(done, function () { fallback(t); done(); }); }
+  catch (e) { fallback(t); done(); }
+};
+function fallback(t) {
+  var x = document.createElement("textarea"); x.value = t; document.body.appendChild(x); x.select();
+  try { document.execCommand("copy"); } catch (e) {}
+  document.body.removeChild(x);
+}
+W.aiClear = function () { chat = []; draft = ""; mount(); };
+
+W.aiSend = async function () {
+  var ta = document.getElementById("aiin");
+  var text = (ta ? ta.value : draft).trim();
+  if (!text || busy) return;
+  var user = W.FB && W.FB.auth && W.FB.auth.currentUser;
+  if (!user) { alert("Please log in again."); return; }
+  chat.push({ role: "user", content: text });
+  draft = ""; busy = true; mount();
+  window.scrollTo(0, document.body.scrollHeight);
+  try {
+    var token = await user.getIdToken();
+    var msgs = chat.filter(function (m) { return !m.err; }).map(function (m) { return { role: m.role, content: m.content }; });
+    var r = await fetch(AI_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+      body: JSON.stringify({ messages: msgs })
+    });
+    var d = await r.json();
+    if (d.reply) chat.push({ role: "assistant", content: d.reply });
+    else chat.push({ role: "assistant", content: d.error || "Something went wrong. Try again.", err: true });
+  } catch (e) {
+    chat.push({ role: "assistant", content: "No internet or the AI is not reachable. Try again.", err: true });
+  }
+  busy = false;
+  if (view === "ai") { mount(); window.scrollTo(0, document.body.scrollHeight); }
+};
+
+var prev = W.render;
+W.render = function () {
+  var keep = document.activeElement && document.activeElement.id === "aiin";
+  prev();
+  var nav = document.getElementById("nav");
+  if (!nav || !nav.children.length) return;
+  var b = document.createElement("button");
+  b.className = view === "ai" ? "a" : "";
+  b.setAttribute("onclick", "view='ai';render()");
+  b.innerHTML = "🤖<br>AI";
+  nav.insertBefore(b, nav.children[1] || null);
+  if (view === "ai") {
+    Array.prototype.forEach.call(nav.children, function (x) { if (x !== b) x.className = ""; });
+    mount();
+    if (keep) { var t = document.getElementById("aiin"); if (t) t.focus(); }
+  }
+};
+W.render();
+                                    </script>
